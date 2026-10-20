@@ -3,7 +3,9 @@ __pycache__/
 .pytest_cache/
 .env
 *.pyc
-qdrant_data/
 .DS_Store
+frontend/node_modules/
+frontend/dist/
+frontend/.env
 benchmark/examples/*
 !benchmark/examples/.gitkeep

@@ -1,17 +1,20 @@
 install:
 	pip install -r requirements.txt
 
-qdrant:
-	docker compose up -d qdrant
-
 index:
 	python scripts/index_knowledge.py
 
 api:
-	uvicorn app.main:app --reload --port 8000
+	uvicorn app.main:app --reload --port 8001
 
-ui:
-	streamlit run streamlit_app.py
+frontend-install:
+	cd frontend && npm install
+
+frontend:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm run build
 
 test:
 	pytest -q
