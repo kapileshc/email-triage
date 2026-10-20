@@ -1,0 +1,56 @@
+name: Deploy to EC2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build React frontend
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Prepare SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload backend
+        run: |
+          rsync -az --delete \
+            --exclude '.git' --exclude 'frontend' --exclude '.env' --exclude '.venv' \
+            ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_APP_DIR }}/"
+
+      - name: Upload frontend build to Tomcat
+        run: |
+          rsync -az --delete frontend/dist/ \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.TOMCAT_WEBAPP_DIR }}/"
+
+      - name: Restart FastAPI service
+        run: |
+          ssh "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'EOF'
+            set -e
+            cd "${{ secrets.EC2_APP_DIR }}"
+            python3 -m venv .venv
+            .venv/bin/pip install --upgrade pip
+            .venv/bin/pip install -r requirements.txt
+            sudo systemctl restart email-triage
+            sleep 4
+            curl --fail http://127.0.0.1:8001/api/health
+          EOF

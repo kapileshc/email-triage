@@ -1,0 +1,19 @@
+[Unit]
+Description=Email Triage FastAPI Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/email-triage
+EnvironmentFile=/opt/email-triage/.env
+ExecStart=/opt/email-triage/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=always
+RestartSec=5
+
+# t3.micro-friendly limits
+MemoryMax=350M
+TasksMax=80
+
+[Install]
+WantedBy=multi-user.target

@@ -1,224 +1,192 @@
 # Multimodal Agentic Email Triage System
 
-A portfolio-grade demo of an **agentic, multilingual email-processing pipeline** that combines email text, PDF/image attachments, offline document extraction, RAG, and a local Gemma 3 model to produce grounded reply drafts.
-
-> Resume-aligned capabilities:
-> - Multimodal email + attachment understanding
-> - Multi-step agentic routing
-> - Offline OCR/document processing
-> - Multilingual normalization
-> - Qdrant-based retrieval
-> - Grounded reply generation
+A production-style portfolio project for multilingual email triage with **React + FastAPI on AWS EC2**, cloud OCR through **Azure AI Document Intelligence**, retrieval through **Qdrant Cloud**, and serverless LLM inference through **Microsoft Foundry**.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Email + Attachments] --> B[Email Parser]
-    B --> C[Language Detection]
-    B --> D[Attachment Router]
-    D --> E[PDF Text Extraction]
-    D --> F[Offline OCR]
-    E --> G[Normalized Context]
-    F --> G
-    C --> G
-    G --> I[Triage Agent]
-    I -->|Needs knowledge| J[Qdrant RAG]
-    J --> K[Grounding Context]
-    I -->|No retrieval| L[Reply Generator]
-    K --> L
-    L --> M[Grounded Draft + Decision Trace]
+    U[React UI on Tomcat] --> A[FastAPI on EC2 t3.micro]
+    A --> L[Language + Agent Routing]
+    A --> P[Native PDF extraction]
+    P -->|Scanned / low text| O[Azure Document Intelligence]
+    L --> Q[Qdrant Cloud]
+    Q --> M[Azure Foundry Serverless LLM]
+    O --> Q
+    M --> R[Grounded Reply + Trace]
+    R --> U
 ```
 
-## What the agent decides
+The EC2 instance remains intentionally lightweight: it coordinates requests but does not run an LLM, OCR model, or vector database locally.
 
-The agent returns a structured decision containing:
+## Why this design
 
-- category
-- priority
-- detected language
-- whether attachment extraction is needed
-- whether retrieval is needed
-- whether a reply is needed
-- whether human review is required
-- routing reason
+- **t3.micro friendly:** one FastAPI worker; heavy AI workloads are remote.
+- **Low-cost:** serverless model inference, Qdrant Cloud free tier for development, and Azure Document Intelligence usage-based OCR.
+- **Portable:** frontend/backend are independent of the specific Azure model selected.
+- **Auditable:** every request returns a decision, evidence and processing trace.
+- **Recruiter-friendly:** demonstrates hybrid-cloud architecture and CI/CD rather than a notebook-only RAG demo.
 
-This makes the workflow auditable instead of hiding everything in one prompt.
+## Stack
 
-## Demo flow
-
-1. Paste an email into the Streamlit UI or call the FastAPI endpoint.
-2. Upload a PDF/image attachment if present.
-3. The system extracts machine-readable text locally.
-4. If required, OCR runs locally.
-5. Language is detected.
-6. The triage agent decides downstream processing.
-7. Relevant approved knowledge is retrieved from Qdrant.
-8. Gemma 3 drafts a reply using only the email, attachment text, and retrieved context.
-9. The system returns the triage decision, evidence, reply, and processing trace.
-
-## Tech stack
-
-- Python 3.11+
+- React + Vite
 - FastAPI
-- Streamlit
-- LangChain
-- Gemma 3 via Ollama
-- Qdrant
-- PyMuPDF
-- Tesseract OCR
-- langdetect
-- Sentence Transformers
+- Azure Foundry serverless model (configured through environment variables)
+- Azure AI Document Intelligence
+- Azure-hosted embedding endpoint
+- Qdrant Cloud
+- PyMuPDF for native PDF extraction
+- GitHub Actions
+- AWS EC2 + systemd
+- Existing Tomcat for static React hosting
 
-## Repository structure
+## Request flow
+
+1. User enters an email and optionally attaches PDF/images.
+2. FastAPI detects language and performs the first triage decision.
+3. Text PDFs are extracted locally with PyMuPDF because that is inexpensive.
+4. Scanned PDFs/images are sent to Azure Document Intelligence.
+5. Approved knowledge is retrieved from Qdrant Cloud when the agent decides retrieval is needed.
+6. Azure Foundry generates a grounded reply using the email, attachment text and retrieved evidence.
+7. The UI displays the triage decision, evidence, reply and execution trace.
+
+## Project structure
 
 ```text
 email-triage/
 ├── app/
 │   ├── agents/
-│   │   └── triage_agent.py
+│   ├── embeddings/
 │   ├── llm/
-│   │   └── gemma.py
 │   ├── ocr/
-│   │   ├── base.py
-│   │   ├── pymupdf_extractor.py
-│   │   └── tesseract_engine.py
 │   ├── rag/
-│   │   └── qdrant_store.py
 │   ├── services/
-│   │   ├── attachment_processor.py
-│   │   ├── language_service.py
-│   │   └── pipeline.py
 │   ├── config.py
-│   ├── main.py
-│   ├── prompts.py
-│   └── schemas.py
-├── benchmark/
-│   ├── benchmark_ocr.py
-│   └── sample_manifest.json
+│   └── main.py
+├── frontend/
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.js
 ├── data/
-│   ├── approved_knowledge.json
-│   └── sample_emails.json
 ├── scripts/
-│   └── index_knowledge.py
+├── benchmark/
 ├── tests/
-│   ├── test_attachment_processor.py
-│   └── test_triage_rules.py
-├── streamlit_app.py
-├── docker-compose.yml
-├── requirements.txt
-├── .env.example
-└── Makefile
+├── deploy/
+└── .github/workflows/
 ```
 
-## Quick start
+## Local backend setup
 
-### 1. Virtual environment
-
-```bash
-python -m venv .venv
-```
-
-Windows:
-
-```bash
-.venv\Scripts\activate
-```
-
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
+```powershell
+cd D:\email-triage
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-### 3. Start Qdrant
+Fill in the Azure and Qdrant credentials in `.env`, then index the demo knowledge base:
 
-```bash
-docker compose up -d qdrant
+```powershell
+python scripts\index_knowledge.py
 ```
 
-### 4. Start local Gemma 3
+Start FastAPI:
 
-Install Ollama, then:
-
-```bash
-ollama pull gemma3:4b
+```powershell
+uvicorn app.main:app --reload --port 8001
 ```
 
-### 5. Configure
+Health check:
 
-Copy `.env.example` to `.env`.
-
-### 6. Index sample approved knowledge
-
-```bash
-python scripts/index_knowledge.py
+```text
+http://127.0.0.1:8001/api/health
 ```
 
-### 7. Run API
+## Local React setup
 
-```bash
-uvicorn app.main:app --reload --port 8000
+In a second terminal:
+
+```powershell
+cd D:\email-triage\frontend
+npm install
+npm run dev
 ```
 
-### 8. Run UI
+Open:
 
-```bash
-streamlit run streamlit_app.py
+```text
+http://localhost:5173/email-triage/
 ```
 
-## API example
+Vite proxies `/api` calls to FastAPI on port 8001.
 
-```bash
-curl -X POST "http://localhost:8000/triage" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"sender\":\"customer@example.com\",\"subject\":\"Unable to access my account\",\"body\":\"I reset my password twice but I still cannot login. Please help.\",\"attachments\":[]}"
+## Required cloud configuration
+
+### Azure Foundry
+
+Set:
+
+```env
+AZURE_MODEL_ENDPOINT=
+AZURE_MODEL_API_KEY=
+AZURE_MODEL_NAME=Phi-4
 ```
 
-## Offline OCR benchmark
+The code is model-name configurable; if your East US subscription exposes another serverless model, change only `AZURE_MODEL_NAME` and endpoint credentials.
 
-The benchmark is adapter-based so multiple local OCR/VLM approaches can be tested on the same bilingual dataset.
+### Azure Document Intelligence
 
-```bash
-python benchmark/benchmark_ocr.py --dataset benchmark/sample_manifest.json --engine tesseract
+```env
+AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=
+AZURE_DOCUMENT_INTELLIGENCE_KEY=
+AZURE_DOCUMENT_MODEL=prebuilt-read
 ```
 
-Metrics:
+### Azure embeddings
 
-- Character Error Rate
-- Word Error Rate
-- Latency/document
+```env
+AZURE_EMBEDDING_ENDPOINT=
+AZURE_EMBEDDING_API_KEY=
+AZURE_EMBEDDING_MODEL=
+```
 
-You can add adapters for PaddleOCR, Docling, Surya, or a local VLM and compare all engines on the same 200-document corpus.
+Use the same embedding deployment for indexing and querying Qdrant.
 
-## Interview talking points
+### Qdrant Cloud
 
-**Why an agent instead of one prompt?**  
-Different emails require different work. Some need attachment extraction, some need policy retrieval, and high-risk cases require escalation. Explicit routing makes the system testable.
+```env
+QDRANT_URL=
+QDRANT_API_KEY=
+QDRANT_COLLECTION=email_triage_knowledge
+```
 
-**How do you reduce hallucination?**  
-The reply stage receives only the email, locally extracted attachment text, and retrieved approved knowledge. Unsupported policy claims are forbidden by the system prompt.
+## CI/CD
 
-**Why Qdrant?**  
-It supports local/private vector retrieval, metadata, and a production-style RAG architecture.
+`.github/workflows/ci.yml` automatically runs backend tests and builds the React app on pushes/PRs.
 
-**Why benchmark OCR independently?**  
-OCR quality changes with language, scan quality, layout, and document type. Model size alone is not a reliable selection criterion.
+`.github/workflows/deploy-ec2.yml` is a manually triggered deployment workflow. This prevents failed deployments before your EC2 secrets and Tomcat paths are configured. It:
 
-## Next production upgrades
+1. runs backend tests;
+2. builds React on the GitHub runner rather than the t3.micro;
+3. rsyncs backend code to EC2;
+4. copies the compiled React files into the existing Tomcat webapp directory;
+5. restarts the FastAPI systemd service;
+6. performs `/api/health` verification.
 
-- Gmail / Microsoft Graph ingestion
-- PaddleOCR, Docling and local VLM adapters
-- multilingual offline translation using Argos/NLLB
-- reranking
-- PII redaction
-- audit logging
-- prompt/evaluation regression suite
-- LangGraph durable execution
-- queue-based workers
+See `deploy/README.md` for the required repository secrets and one-time EC2 setup.
+
+## Cost-conscious design
+
+The application does not keep a GPU running. Heavy operations are usage-based cloud calls, while the existing EC2 instance only handles HTTP orchestration and native PDF text extraction. Keep attachment limits small and configure Azure budget alerts before exposing a public demo.
+
+## Security
+
+- Never commit `.env` or cloud API keys.
+- Keep the backend bound to `127.0.0.1:8001` in production and expose it through the existing reverse proxy.
+- Restrict EC2 security-group access; FastAPI itself does not need to be public if `/api` is proxied.
+- Rotate Azure/Qdrant keys if they are ever pasted into source control.
+
+## Resume-aligned talking point
+
+> Built a hybrid-cloud multimodal email triage system with React/FastAPI on AWS EC2, Azure Document Intelligence for attachment extraction, Qdrant Cloud RAG, Azure Foundry serverless inference, and GitHub Actions CI/CD with grounded decision traces and human-review routing.
