@@ -128,12 +128,18 @@ Vite proxies `/api` calls to FastAPI on port 8001.
 Set:
 
 ```env
-AZURE_MODEL_ENDPOINT=
-AZURE_MODEL_API_KEY=
-AZURE_MODEL_NAME=Phi-4
+AZURE_MODEL_ENDPOINT=https://kapilesh1-2109-resource.services.ai.azure.com/openai/v1
+AZURE_MODEL_API_KEY=<your-api-key>
+AZURE_MODEL_NAME=gpt-4.1-mini
 ```
 
-The code is model-name configurable; if your East US subscription exposes another serverless model, change only `AZURE_MODEL_NAME` and endpoint credentials.
+Model calls use the OpenAI Responses API and authenticate with the Azure AI resource API key. Keep the real key only in `.env` or your deployment secret store; never commit it.
+
+Run a live connection check after configuring the key:
+
+```bash
+python scripts/test_azure_model.py
+```
 
 ### Azure Document Intelligence
 

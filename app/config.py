@@ -7,9 +7,9 @@ class Settings(BaseSettings):
     api_port: int = 8001
     allowed_origins: str = "http://localhost:5173"
 
-    azure_model_endpoint: str = "https://emailtriage.openai.azure.com/openai/v1/"
+    azure_model_endpoint: str = "https://kapilesh1-2109-resource.services.ai.azure.com/openai/v1"
     azure_model_api_key: str = ""
-    azure_model_name: str = "gpt-4o-mini"
+    azure_model_name: str = "gpt-4.1-mini"
     azure_model_max_tokens: int = 600
 
     azure_embedding_endpoint: str = ""
