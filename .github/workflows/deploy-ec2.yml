@@ -6,22 +6,38 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -r requirements.txt
-      - run: pytest -q
+          cache: 'pip'
 
-      - uses: actions/setup-node@v4
+      - name: Install backend dependencies for CI
+        run: pip install -r requirements.txt
+
+      - name: Run backend tests
+        run: pytest -q
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Build React frontend
         working-directory: frontend
         run: |
-          npm install
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
           npm run build
 
       - name: Prepare SSH key
@@ -31,26 +47,60 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Upload backend
+      - name: Ensure EC2 application directory exists
+        run: |
+          ssh "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "mkdir -p '${{ secrets.EC2_APP_DIR }}'"
+
+      - name: Upload backend source
         run: |
           rsync -az --delete \
-            --exclude '.git' --exclude 'frontend' --exclude '.env' --exclude '.venv' \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'frontend' \
+            --exclude '.env' \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude '.pytest_cache' \
             ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_APP_DIR }}/"
 
-      - name: Upload frontend build to Tomcat
+      - name: Upload pre-built React frontend to Tomcat
         run: |
           rsync -az --delete frontend/dist/ \
             "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.TOMCAT_WEBAPP_DIR }}/"
 
-      - name: Restart FastAPI service
+      - name: Install changed dependencies and restart FastAPI
         run: |
           ssh "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'EOF'
-            set -e
-            cd "${{ secrets.EC2_APP_DIR }}"
-            python3 -m venv .venv
-            .venv/bin/pip install --upgrade pip
-            .venv/bin/pip install -r requirements.txt
+            set -euo pipefail
+
+            APP_DIR="${{ secrets.EC2_APP_DIR }}"
+            cd "$APP_DIR"
+
+            # Create the virtual environment only once.
+            if [ ! -x .venv/bin/python ]; then
+              python3 -m venv .venv
+            fi
+
+            # Reinstall dependencies only when requirements.txt changes.
+            NEW_HASH="$(sha256sum requirements.txt | awk '{print $1}')"
+            OLD_HASH=""
+            if [ -f .requirements.sha256 ]; then
+              OLD_HASH="$(cat .requirements.sha256)"
+            fi
+
+            if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+              echo "requirements.txt changed; installing Python dependencies..."
+              .venv/bin/pip install --upgrade pip
+              .venv/bin/pip install -r requirements.txt
+              printf '%s' "$NEW_HASH" > .requirements.sha256
+            else
+              echo "requirements.txt unchanged; skipping pip install."
+            fi
+
             sudo systemctl restart email-triage
             sleep 4
-            curl --fail http://127.0.0.1:8001/api/health
+            curl --fail --silent --show-error http://127.0.0.1:8001/api/health
+            echo
+            echo "Deployment successful."
           EOF
